@@ -15,6 +15,7 @@ autom4te.cache/
 # Ignore build utilities.
 aclocal.m4
 libtool
+<<<<<<< HEAD
 configure
 Makefile
 Makefile.in
@@ -40,3 +41,6 @@ cloog-*.pc.in
 # Miscellaneous.
 doc/gitversion.texi
 test/generate_test*
+test/test_main*
+test/test_test*
+test/temp_generated*
