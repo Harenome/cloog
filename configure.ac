@@ -99,8 +99,17 @@ dnl  **************************************************************************/
 AC_CHECK_FUNCS([getrusage],
 	[AC_DEFINE([CLOOG_RUSAGE], [], [Print time required to generate code])])
 
-AX_SUBMODULE(isl,no|system|build|bundled,bundled)
 BITS="gmp"
+
+dnl /**************************************************************************
+dnl  *                          ISL VS. Polylib                               *
+dnl  **************************************************************************/
+
+if test $with_isl != no -a $with_polylib != no; then
+    AC_MSG_ERROR(Both PolyLib and ISL are enabled)
+elif test $with_isl = no -a $with_polylib = no; then
+    AC_MSG_ERROR(Neither PolyLib nor ISL is enabled)
+fi
 
 dnl /**************************************************************************
 dnl  *                            Where is GMP?                               *
@@ -145,20 +154,23 @@ dnl /**************************************************************************
 dnl  *                          Where is isl?                                 *
 dnl  **************************************************************************/
 
+AX_SUBMODULE(isl,no|system|build|bundled,bundled)
+isl_flag="ISL_SUPPORT"
+
 AC_SUBST(ISL_CPPFLAGS)
 AC_SUBST(ISL_LDFLAGS)
 AC_SUBST(ISL_LIBS)
 case "$with_isl" in
 bundled)
-	ISL_CPPFLAGS="-I$srcdir/isl/include -Iisl/include"
+	ISL_CPPFLAGS="-D$isl_flag -I$srcdir/isl/include -Iisl/include"
 	;;
 build)
-	ISL_CPPFLAGS="-I$isl_srcdir/include -I$with_isl_builddir/include"
+	ISL_CPPFLAGS="-D$isl_flag -I$isl_srcdir/include -I$with_isl_builddir/include"
 	ISL_LIBS="$with_isl_builddir/libisl.la"
 	;;
 system)
 	if test "x$with_isl_prefix" != "x"; then
-		ISL_CPPFLAGS="-I$with_isl_prefix/include"
+		ISL_CPPFLAGS="-D$isl_flag -I$with_isl_prefix/include"
 	fi
 	if test "x$with_isl_exec_prefix" != "x"; then
 		ISL_LDFLAGS="-L$with_isl_exec_prefix/lib"
@@ -207,6 +219,36 @@ if test -f $srcdir/.git/HEAD; then
 	GIT_INDEX="\$(top_srcdir)/.git/index"
 fi
 
+dnl /**************************************************************************
+dnl  *                          Where is PolyLib?                             *
+dnl  **************************************************************************/
+
+AX_SUBMODULE(polylib,no|system|build|bundled,no)
+polylib_flag="POLYLIB_SUPPORT"
+
+AC_SUBST(POLYLIB_CPPFLAGS)
+AC_SUBST(POLYLIB_LDFLAGS)
+AC_SUBST(POLYLIB_LIBS)
+
+case "$with_polylib" in
+    bundled)
+        POLYLIB_CPPFLAGS="-D$polylib_flag -I$srcdir/polylib/include -Ipolylib/include"
+        ;;
+    build)
+        POLYLIB_CPPFLAGS="-D$polylib_flag -I$polylib_srcdir/include -I$with_polylib_builddir/include"
+        POLYLIB_LIBS="$with_polylib_builddir/libpolylib$BITS.la"
+        ;;
+    system)
+        if test "x$with_polylib_prefix" != "x"; then
+            POLYLIB_CPPFLAGS="-D$polylib_flag -I$with_polylib_prefix/include"
+        fi
+        if test "x$with_polylib_exec_prefix" != "x"; then
+            POLYLIB_LDFLAGS="-L$with_polylib_exec_prefix/lib"
+        fi
+        POLYLIB_LIBS="-lpolylib$BITS"
+esac
+AM_CONDITIONAL(BUNDLED_POLYLIB, test $with_polylib = bundled)
+AM_CONDITIONAL(NO_POLYLIB, test $with_polylib = no)
 
 dnl /**************************************************************************
 dnl  *                            Substitutions                               *
@@ -227,7 +269,11 @@ AC_SUBST(VERSION_MAJOR)
 AC_SUBST(VERSION_MINOR)
 AC_SUBST(VERSION_REVISION)
 
-PACKAGE_NAME="cloog-isl"
+if test $with_polylib != no; then
+    PACKAGE_NAME="cloog-polylib"
+else
+    PACKAGE_NAME="cloog-isl"
+fi
 PACKAGE_CFLAGS="-DCLOOG_INT_GMP=1"
 AX_CREATE_PKGCONFIG_INFO
 
@@ -246,6 +292,12 @@ if test $with_isl = bundled; then
 fi
 if test $with_osl = bundled; then
 	AC_CONFIG_SUBDIRS(osl)
+fi
+if test $with_polylib = bundled; then
+    AC_CONFIG_SUBDIRS(polylib)
+    AC_CONFIG_COMMANDS_PRE([
+        ac_configure_args="$ac_configure_args --with-libgmp"
+    ])
 fi
 AC_CONFIG_COMMANDS_POST([
 	ac_configure_args="$ac_configure_args $cloog_configure_args"

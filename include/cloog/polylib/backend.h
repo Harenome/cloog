@@ -1,7 +1,7 @@
 #ifndef CLOOG_POLYLIB_BACKEND_H
 #define CLOOG_POLYLIB_BACKEND_H
 
-#include <polylib/@cl_cv_polylib@.h>
+#include <polylib/polylibgmp.h>
 
 /**
  * The maximal number of rays allowed to be allocated by PolyLib. In fact since

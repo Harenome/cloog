@@ -36,6 +36,7 @@
 # * Written by Cedric Bastoul, Cedric.Bastoul@inria.fr                        *
 # *                                                                           *
 # *****************************************************************************/
+
 if BUNDLED_ISL
     MAYBE_ISL = isl
     ISL_LA = $(top_builddir)/isl/libisl.la
@@ -46,9 +47,14 @@ if BUNDLED_OSL
     OSL_LA = $(top_builddir)/osl/libosl.la
 endif
 
+if BUNDLED_POLYLIB
+    MAYBE_POLYLIB = polylib
+    POLYLIB_LA = $(top_builddir)/polylib/libpolylib$(BITS).la
+endif
+
 AUTOMAKE_OPTIONS = subdir-objects
-SUBDIRS = $(MAYBE_ISL) $(MAYBE_OSL) . doc test
-DIST_SUBDIRS = $(MAYBE_ISL) $(MAYBE_OSL) . doc test
+SUBDIRS = $(MAYBE_ISL) $(MAYBE_OSL) $(MAYBE_POLYLIB) . doc test
+DIST_SUBDIRS = $(MAYBE_ISL) $(MAYBE_OSL) $(MAYBE_POLYLIB) . doc test
 
 ACLOCAL_AMFLAGS = -I m4
 
@@ -57,12 +63,13 @@ isl/libisl.la: FORCE
 	cd isl; $(MAKE) $(AM_MAKEFLAGS) libisl.la
 
 if NO_ISL
-CLOOG =
-LIBCLOOG =
+    CLOOG = cloog
+    LIBCLOOG = libcloog-polylib.la
 else
-CLOOG = cloog
-LIBCLOOG = libcloog-isl.la
+    CLOOG = cloog
+    LIBCLOOG = libcloog-isl.la
 endif
+
 bin_PROGRAMS = $(CLOOG)
 lib_LTLIBRARIES = $(LIBCLOOG)
 
@@ -91,6 +98,7 @@ SOURCES_CORE = \
 
 AM_CPPFLAGS = -I. -I$(top_builddir)/include -I$(top_srcdir)/include
 AM_CFLAGS = $(CFLAGS_WARN)
+
 libcloog_isl_la_CPPFLAGS = -I. -I$(top_builddir)/include -I$(top_srcdir)/include @ISL_CPPFLAGS@ @OSL_CPPFLAGS@
 libcloog_isl_la_LDFLAGS = -version-info @versioninfo@ \
 	-rpath $(libdir) @ISL_LDFLAGS@ @OSL_LDFLAGS@
@@ -100,8 +108,21 @@ libcloog_isl_la_SOURCES = \
 	source/isl/domain.c \
 	source/isl/constraints.c \
 	source/isl/backend.c
-LDADD = libcloog-isl.la
-cloog_DEPENDENCIES = libcloog-isl.la
+
+libcloog_polylib_la_CPPFLAGS = -I. -I$(top_builddir)/include \
+	-I$(top_srcdir)/include @POLYLIB_CPPFLAGS@ @OSL_CPPFLAGS@
+libcloog_polylib_la_LDFLAGS = -version-info @versioninfo@ \
+	-rpath $(libdir) @POLYLIB_LDFLAGS@ @OSL_LDFLAGS@
+libcloog_polylib_la_LIBADD = @POLYLIB_LIBS@ @OSL_LIBS@ $(POLYLIB_LA) $(OSL_LA)
+libcloog_polylib_la_SOURCES = \
+	$(SOURCES_CORE) \
+	source/polylib/domain.c \
+	source/polylib/constraintset.c \
+	source/polylib/backend.c
+
+LDADD = $(LIBCLOOG)
+
+cloog_DEPENDENCIES = $(LIBCLOOG)
 cloog_SOURCES = source/cloog.c
 
 pkginclude_HEADERS = \
@@ -125,10 +146,6 @@ pkginclude_HEADERS = \
 	include/cloog/util.h \
 	include/cloog/version.h
 
-pkgmatrixincludedir = $(pkgincludedir)/matrix
-pkgmatrixinclude_HEADERS = \
-	include/cloog/matrix/constraintset.h
-
 pkgislincludedir = $(pkgincludedir)/isl
 pkgislinclude_HEADERS = \
 	include/cloog/isl/backend.h \
@@ -136,12 +153,18 @@ pkgislinclude_HEADERS = \
 	include/cloog/isl/domain.h \
 	include/cloog/isl/constraintset.h
 
+pkgpolylibincludedir = $(pkgincludedir)/polylib
+pkgpolylibinclude_HEADERS = \
+	include/cloog/polylib/backend.h \
+	include/cloog/polylib/cloog.h \
+	include/cloog/polylib/constraintset.h \
+	include/cloog/polylib/domain.h
+
 version.h: @GIT_INDEX@
 	echo '#define CLOOG_HEAD "'`$(top_builddir)/genversion.sh`'"' > $@
 
 EXTRA_DIST = \
 	autoconf/Doxyfile.in \
-	source/matrix/constraintset.c \
 	cmake \
 	doc/cloog.texi \
 	doc/images \

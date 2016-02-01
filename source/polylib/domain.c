@@ -43,6 +43,11 @@
 #include <string.h>
 #include <cloog/polylib/cloog.h>
 
+#ifdef OSL_SUPPORT
+#include <osl/macros.h>
+#include <osl/relation.h>
+#endif
+
 #define ALLOCN(type,n) (type*)malloc((n)*sizeof(type))
 
 static CloogDomain * cloog_domain_polylib_matrix2domain(CloogState *state,
@@ -951,6 +956,224 @@ CloogScattering *cloog_scattering_from_cloog_matrix(CloogState *state,
  *                            Processing functions                            *
  ******************************************************************************/
 
+#ifdef OSL_SUPPORT
+
+/* In order to use errormsg1() in the parts inspired from the PolyLib
+ * implementations.
+ */
+#include <polylib/errormsg.h>
+
+/* Do note that this function modifies str. */
+static Polyhedron * polyhedron_read_from_strtok(char *str,
+        unsigned int *nb_par, char **saveptr)
+{
+  const char * delim = "\r\n";
+
+  int i = 0, j = 0;
+  unsigned rows = 0, columns = 0;
+  char *z = NULL, *c = NULL, ignored[2] = { '\0' };
+  Value *p = NULL;
+  Matrix *constraints = NULL;
+  Polyhedron *polyhedron = NULL;
+
+  *saveptr = str;
+
+  /* Attempt to read the size of the matrix. */
+  while (constraints == NULL && *saveptr != NULL)
+  {
+    /* The first sscanf will match (and thus return 1) lines that start
+     * with a comment.
+     * The second sscanf tries to match the line that describes an OpenScop
+     * relation and contains 6 numbers: rows, columns, output dimensions,
+     * input dimensions, local dimensions and parameters. The dimensions
+     * are useless here. It should be fine to overwrite nb_par in successive
+     * calls to the function since the number of parameters should be the
+     * same for all relations in the entire OpenScop file.
+     */
+    if (sscanf(*saveptr, " %1[#]", ignored) != 1
+        && sscanf(*saveptr, "%d %d %*d %*d %*d %d", &rows, &columns,
+            nb_par) == 3)
+    {
+      constraints = Matrix_Alloc(rows, columns);
+      if (constraints == NULL)
+      {
+        errormsg1("polyhedron_read_from_strtok", "outofmem", "out of memory");
+        return NULL;
+      }
+    }
+    *saveptr = strtok(NULL, delim);
+  }
+
+  if (constraints == NULL)
+    return NULL;
+
+  /* Attempt to read the matrix itself.
+   * This part is very strongly inspired from the PolyLib implementation of the
+   * Matrix_Read_Input() function.
+   */
+  p = constraints->p_Init;
+  for (i = 0; i < rows; ++i)
+  {
+    /* Ignore comments. */
+    while (*saveptr != NULL && sscanf(*saveptr, " %1[#]", ignored) == 1)
+      *saveptr = strtok(NULL, delim);
+
+    if (*saveptr == NULL)
+    {
+      errormsg1("polyhedron_read_from_strtok", "baddim", "not enough rows");
+      Matrix_Free(constraints);
+      return NULL;
+    }
+
+    c = *saveptr;
+
+    /* Jump to the first non space char */
+    while (isspace(*c) && *c != '\n' && *c)
+      ++c;
+
+    /* Read the columns. */
+    for (j = 0; j < columns; ++j)
+    {
+      if (*c=='\n' || *c=='#' || *c=='\0')
+      {
+        errormsg1("polyhedron_read_from_strtok", "baddim", "not enough columns");
+        Matrix_Free(constraints);
+        return NULL;
+      }
+
+      /* Go the the next space or the end. */
+      for (z = c; *z; z++)
+        if(*z=='\n' || *z=='#' || isspace(*z))
+          break;
+
+      if (*z)
+        *z = '\0';
+      else
+        z--; /* Hit eol: go back one char. */
+      value_read(*(p++), c);
+      /* Point to the next non space char. */
+      c = z+1;
+      while (isspace(*c))
+        c++;
+    }
+    *saveptr = strtok(NULL, delim);
+  }
+
+  polyhedron = Constraints2Polyhedron(constraints, 512);
+  Matrix_Free(constraints);
+
+  return polyhedron;
+}
+
+/* Do note that this function modifies str. */
+static Polyhedron *domain_union_read_from_osl_str(char *str,
+    unsigned int *nb_par)
+{
+  const char *delim = "\r\n";
+
+  char ignored[2] = { '\0' };
+  int i = 0, union_size = 0, useless = 0, scanned = 0;
+  Polyhedron *result = NULL, *pol_1 = NULL, *pol_2 = NULL;
+
+  char *current_line = strtok(str, delim);
+
+  while (current_line != NULL && union_size == 0)
+  {
+    /* The line does not start with a comment. */
+    if (sscanf(current_line, " %1[#]", ignored) != 1)
+    {
+      /* The number of domains in the union is the sole number on its line.
+       * However, it is optional if there is only one domain... Thus, if there
+       * is more than one number on the line: there is only one domain...
+       */
+      scanned = sscanf(current_line, "%d %d", &union_size, &useless);
+      if (scanned > 1)
+        union_size = 1;
+      else if (scanned < 1)
+        union_size = 0;
+    }
+
+    /* The line must be kept if the current line describes a domain! */
+    if (union_size != 1)
+      current_line = strtok(NULL, delim);
+  }
+
+  if (union_size > 0)
+  {
+    result = polyhedron_read_from_strtok(current_line, nb_par, &current_line);
+    for (i = 1; i < union_size; ++i)
+    {
+      pol_1 = result;
+      pol_2 = polyhedron_read_from_strtok(current_line, nb_par, &current_line);
+      result = DomainUnion(pol_1, pol_2, 512);
+      Polyhedron_Free(pol_1);
+      Polyhedron_Free(pol_2);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Converts an openscop relation to a CLooG domain.
+ * \param[in,out] state    CLooG state.
+ * \param[in]     relation OpenScop relation to convert.
+ * \return A new CloogDomain corresponding to the input OpenScop relation.
+ */
+CloogDomain *cloog_domain_from_osl_relation(CloogState *state,
+    osl_relation_p relation)
+{
+  /* This implementation is inspired from the version of
+   * cloog_domain_from_osl_relation() available in `source/isl/domain.c'.
+   */
+  char *str;
+  unsigned int nb_par;
+  Polyhedron *polyhedron = NULL;
+  CloogDomain *domain = NULL;
+
+  if (relation != NULL)
+  {
+    str = osl_relation_spprint_polylib(relation, NULL);
+    polyhedron = domain_union_read_from_osl_str (str, &nb_par);
+    domain = cloog_domain_from_polylib_polyhedron(state, polyhedron, nb_par);
+    free(str);
+  }
+
+  return domain;
+}
+
+/**
+ * Converts an openscop scattering relation to a CLooG scattering.
+ * \param[in,out] state    CLooG state.
+ * \param[in]     relation OpenScop relation to convert.
+ * \return A new CloogScattering corresponding to the input OpenScop relation.
+ */
+CloogScattering *cloog_scattering_from_osl_relation(CloogState *state,
+    osl_relation_p relation)
+{
+  /* This implementation is inspired from the version of
+   * cloog_scattering_from_osl_relation() available in `source/isl/domain.c'.
+   */
+  char *str;
+  unsigned int nb_par;
+  Polyhedron *polyhedron = NULL;
+  CloogScattering *scattering = NULL;
+
+  if (relation != NULL)
+  {
+    if (relation->type != OSL_TYPE_SCATTERING)
+      cloog_die("Cannot convert a non-scattering relation to a scattering.\n");
+
+    str = osl_relation_spprint_polylib(relation, NULL);
+    polyhedron = domain_union_read_from_osl_str (str, &nb_par);
+    scattering =
+      cloog_scattering_from_polylib_polyhedron(state, polyhedron, nb_par);
+    free(str);
+  }
+
+  return scattering;
+}
+#endif
 
 /**
  * cloog_domain_malloc function:
@@ -1324,11 +1547,10 @@ void cloog_domain_stride(CloogDomain *domain, int strided_level,
  * bound at the given level is an integral constant.
  */
 int cloog_domain_can_stride(CloogDomain *domain, int level)
-{ int i, first_lower=1, dimension, lower_constraint=-1 ;
+{ int i, first_lower=1, lower_constraint=-1 ;
   Polyhedron * polyhedron ;
  
   polyhedron = domain->polyhedron ;
-  dimension = polyhedron->Dimension ;
   
   /* We want one and only one lower bound (e.g. no equality, no maximum
    * calculation...).
@@ -1839,6 +2061,40 @@ CloogDomain *cloog_domain_cube(CloogState *state,
   P = Constraints2Polyhedron(M, state->backend->MAX_RAYS);
   Matrix_Free(M);
   return cloog_domain_from_polylib_polyhedron(state, P, 0);
+}
+
+/**
+ * cloog_domain_from_bounds
+ * Construct and return a dim-dimensional cube, with values ranging
+ * between lower_bounds and upper_bounds in each dimension.
+ */
+CloogDomain *cloog_domain_from_bounds(CloogState *state,
+        struct cloog_vec *lower_bounds, struct cloog_vec *upper_bounds)
+{
+    /* Inspired from the cloog_domain_cube() in this file and
+     * cloog_domain_from_bounds() in `source/isl/domain.c'.
+     */
+    int i, dim;
+    Matrix *M;
+    Polyhedron *P;
+
+    assert(lower_bounds->size == upper_bounds->size);
+    dim = upper_bounds->size;
+    if (dim == 0)
+        return cloog_domain_universe(state, 0);
+
+    M = Matrix_Alloc(2*dim, 2+dim);
+    for (i = 0; i < dim; ++i) {
+        value_set_si(M->p[2*i][0], 1);
+        value_set_si(M->p[2*i][1+i], 1);
+        value_oppose(M->p[2*i][1+dim], lower_bounds->p[i]);
+        value_set_si(M->p[2*i+1][0], 1);
+        value_set_si(M->p[2*i+1][1+i], -1);
+        value_assign(M->p[2*i+1][1+dim], upper_bounds->p[i]);
+    }
+    P = Constraints2Polyhedron(M, state->backend->MAX_RAYS);
+    Matrix_Free(M);
+    return cloog_domain_from_polylib_polyhedron(state, P, 0);
 }
 
 /**

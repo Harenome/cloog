@@ -4,3 +4,6 @@
 [submodule "osl"]
 	path = osl
 	url = https://github.com/periscop/openscop.git
+[submodule "polylib"]
+	path = polylib
+	url = git://repo.or.cz/polylib.git

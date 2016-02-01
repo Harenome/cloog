@@ -42,7 +42,7 @@
 # include <stdio.h>
 # include <ctype.h>
 #include <cloog/cloog.h>
-#include <cloog/matrix/constraintset.h>
+#include <cloog/polylib/constraintset.h>
 
 
 #define ALLOC(type) (type*)malloc(sizeof(type))
