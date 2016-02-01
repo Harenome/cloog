@@ -37,6 +37,8 @@
 # *                                                                           *
 # *****************************************************************************/
 
+export
+
 if BUNDLED_ISL
     MAYBE_ISL = isl
     ISL_LA = $(top_builddir)/isl/libisl.la

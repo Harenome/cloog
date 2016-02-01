@@ -38,14 +38,15 @@
 # *****************************************************************************/
 
 if NO_ISL
-GENERATE_TEST =
+GENERATE_TEST = generate_test
+GENERATE_TEST_ADVANCED = generate_test_advanced
 else
 GENERATE_TEST = generate_test
 GENERATE_TEST_ADVANCED = generate_test_advanced
 endif
 noinst_PROGRAMS = $(GENERATE_TEST) $(GENERATE_TEST_ADVANCED)
 AM_CPPFLAGS = -I$(top_builddir)/include -I$(top_srcdir)/include
-LDADD = ../libcloog-isl.la
+LDADD = ../$(LIBCLOOG)
 generate_test_SOURCES = generate_test.c
 generate_test_advanced_SOURCES = generate_test_advanced.c
 
@@ -168,11 +169,15 @@ FINITE_CLOOGTEST_C = \
 	reservoir/tang-xue1 \
 	reservoir/two
 
+if NO_ISL
+CLOOG_ISL_TEST_C =
+else
 CLOOG_ISL_TEST_C = \
 	isl/mod \
 	isl/mod2 \
 	isl/mod3 \
 	isl/mod4
+endif
 
 CLOOGTEST_C = \
 	infinite \
@@ -188,8 +193,12 @@ CLOOGTEST_FORTRAN = \
 	levenshtein-1-2-3f \
 	yosrf
 
+if NO_ISL
+CLOOG_ISL_TEST_STRIDED =
+else
 CLOOG_ISL_TEST_STRIDED = \
 	isl/mxm-shared
+endif
 
 CLOOGTEST_STRIDED = \
 	basic-bounds-2 \
@@ -219,9 +228,6 @@ CLOOGTEST_OPENSCOP = \
 endif
 
 SPECIAL_TESTS = \
-	isl/unroll \
-	isl/jacobi-shared \
-	isl/unroll2 \
 	backtrack \
 	vasilache \
 	merge \
@@ -233,11 +239,15 @@ SPECIAL_TESTS = \
 	stride \
 	stride2 \
 	sor1d
+if !NO_ISL
+SPECIAL_TESTS += \
+	isl/unroll \
+	isl/jacobi-shared \
+	isl/unroll2
+endif
+
 
 SPECIAL_OPTIONS = \
-	'isl/unroll -first-unroll 1' \
-	'isl/jacobi-shared -f 4 -l -1 -override -strides 1 -sh 1' \
-	'isl/unroll2 -first-unroll 1' \
 	'backtrack -f 1 -backtrack' \
 	'vasilache -f 8 -l 9' \
 	'merge -f -1' \
@@ -249,6 +259,12 @@ SPECIAL_OPTIONS = \
 	'stride -f -1 -strides 1' \
 	'stride2 -f -1 -strides 1' \
 	'sor1d -f -1'
+if !NO_ISL
+SPECIAL_OPTIONS += \
+	'isl/unroll -first-unroll 1' \
+	'isl/jacobi-shared -f 4 -l -1 -override -strides 1 -sh 1' \
+	'isl/unroll2 -first-unroll 1'
+endif
 
 generate:
 	@echo "             /*-----------------------------------------------*"
@@ -330,12 +346,17 @@ test_regenerate:
 	$(TESTS_ENVIRONMENT) $(srcdir)/check_openscop.sh regenerate ; \
 	$(TESTS_ENVIRONMENT) $(srcdir)/check_special.sh regenerate
 
+if !NO_ISL
 check_SCRIPTS = \
 	check_c.sh \
 	check_fortran.sh \
 	check_strided.sh \
 	check_openscop.sh \
 	check_special.sh
+else
+check_SCRIPTS = \
+	check_hybrid.sh
+endif
 
 TESTS = $(check_SCRIPTS)
 
