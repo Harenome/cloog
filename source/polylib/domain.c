@@ -484,12 +484,21 @@ CloogDomain * cloog_domain_union(CloogDomain * dom1, CloogDomain * dom2)
 {
   Polyhedron *U;
   CloogDomain *dom;
-  int MAX_RAYS = dom1->state->backend->MAX_RAYS;
-  U = DomainUnion(dom1->polyhedron, dom2->polyhedron, MAX_RAYS);
-  dom = cloog_domain_from_polylib_polyhedron(dom1->state, U, dom1->nb_par);
-  cloog_domain_free(dom1);
-  cloog_domain_free(dom2);
-  return dom;
+  int MAX_RAYS;
+
+  if (cloog_domain_isempty(dom1))
+      return dom2;
+  else if (cloog_domain_isempty(dom2))
+      return dom1;
+  else
+  {
+    MAX_RAYS = dom1->state->backend->MAX_RAYS;
+    U = DomainUnion(dom1->polyhedron, dom2->polyhedron, MAX_RAYS);
+    dom = cloog_domain_from_polylib_polyhedron(dom1->state, U, dom1->nb_par);
+    cloog_domain_free(dom1);
+    cloog_domain_free(dom2);
+    return dom;
+  }
 }
 
 
@@ -501,10 +510,15 @@ CloogDomain * cloog_domain_union(CloogDomain * dom1, CloogDomain * dom2)
  */ 
 CloogDomain * cloog_domain_intersection(CloogDomain * dom1, CloogDomain * dom2)
 {
-  int MAX_RAYS = dom1->state->backend->MAX_RAYS;
+  int MAX_RAYS;
+
+  if (cloog_domain_isempty(dom1) || cloog_domain_isempty(dom2))
+      return NULL;
+
+  MAX_RAYS = dom1->state->backend->MAX_RAYS;
   return cloog_domain_from_polylib_polyhedron(dom1->state, DomainIntersection(dom1->polyhedron,
-						  dom2->polyhedron, MAX_RAYS),
-			    dom1->nb_par);
+                            dom2->polyhedron, MAX_RAYS),
+                    dom1->nb_par);
 }
 
 
@@ -1857,12 +1871,18 @@ int cloog_domain_nbconstraints(CloogDomain * domain)
 
 int cloog_domain_dimension(CloogDomain * domain)
 {
-  return domain->polyhedron->Dimension - domain->nb_par;
+  if (cloog_domain_isempty(domain))
+    return 0;
+  else
+    return domain->polyhedron->Dimension - domain->nb_par;
 }
 
 int cloog_domain_parameter_dimension(CloogDomain *domain)
 {
-  return domain->nb_par;
+  if (cloog_domain_isempty(domain))
+    return 0;
+  else
+    return domain->nb_par;
 }
 
 int cloog_scattering_dimension(CloogScattering *scatt, CloogDomain *domain)
