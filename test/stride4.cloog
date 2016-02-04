@@ -27,7 +27,7 @@ t
 
 1 # Iterator name(s)
 
-i0 i1
+i0 i1 i2
 
 # No scattering functions.
 0
