@@ -1,9 +1,12 @@
 [submodule "isl"]
 	path = isl
 	url = git://repo.or.cz/isl.git
+	ignore = untracked
 [submodule "osl"]
 	path = osl
 	url = https://github.com/periscop/openscop.git
+	ignore = untracked
 [submodule "polylib"]
 	path = polylib
 	url = git://repo.or.cz/polylib.git
+	ignore = untracked
