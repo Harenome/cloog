@@ -246,6 +246,13 @@ SPECIAL_TESTS += \
 	isl/unroll2
 endif
 
+if !NO_POLYLIB
+POLYLIB_SPECIAL_TESTS = \
+	polylib/2D-split \
+	polylib/2D-tiled-split \
+	polylib/3D-split
+endif
+
 
 SPECIAL_OPTIONS = \
 	'backtrack -f 1 -backtrack' \
@@ -323,13 +330,20 @@ TESTS_ENVIRONMENT = \
 	CLOOGTEST_FORTRAN="$(CLOOGTEST_FORTRAN)" \
 	CLOOGTEST_STRIDED="$(CLOOGTEST_STRIDED)" \
 	CLOOGTEST_OPENSCOP="$(CLOOGTEST_OPENSCOP)" \
-	SPECIAL_OPTIONS="$(SPECIAL_OPTIONS)"
+	SPECIAL_OPTIONS="$(SPECIAL_OPTIONS)" \
+	POLYLIB_SPECIAL_TESTS="$(POLYLIB_SPECIAL_TESTS)"
 
 test_run: generate_test_advanced$(EXEEXT)
 	$(TESTS_ENVIRONMENT) $(srcdir)/check_run.sh
 
 test_hybrid: generate_test_advanced$(EXEEXT)
 	$(TESTS_ENVIRONMENT) $(srcdir)/check_hybrid.sh;
+
+test_polylib_special: generate_test_advanced$(EXEEXT)
+	$(RM) -rf $(srcdir)/logs; \
+	$(TESTS_ENVIRONMENT) $(srcdir)/check_polylib_special.sh; \
+	echo -e "\n\x1b[1m\x1b[7m Summary \x1b[0m\n"; \
+	cat $(srcdir)/logs/checker.summary.log
 
 test_valgrind:
 	$(RM) -rf $(srcdir)/logs; \
@@ -356,6 +370,7 @@ check_SCRIPTS = \
 else
 check_SCRIPTS = \
 	check_hybrid.sh
+	check_polylib_special.sh
 endif
 
 TESTS = $(check_SCRIPTS)

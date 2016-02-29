@@ -120,7 +120,9 @@ libcloog_polylib_la_SOURCES = \
 	$(SOURCES_CORE) \
 	source/polylib/domain.c \
 	source/polylib/constraintset.c \
-	source/polylib/backend.c
+	source/polylib/backend.c \
+	source/polylib/utilities.c \
+	source/polylib/special.c
 
 LDADD = $(LIBCLOOG)
 
@@ -160,7 +162,9 @@ pkgpolylibinclude_HEADERS = \
 	include/cloog/polylib/backend.h \
 	include/cloog/polylib/cloog.h \
 	include/cloog/polylib/constraintset.h \
-	include/cloog/polylib/domain.h
+	include/cloog/polylib/domain.h \
+	include/cloog/polylib/utilities.h \
+	include/cloog/polylib/special.h
 
 version.h: @GIT_INDEX@
 	echo '#define CLOOG_HEAD "'`$(top_builddir)/genversion.sh`'"' > $@
@@ -199,6 +203,9 @@ valcheck:
 
 test_hybrid:
 	$(MAKE) test_hybrid -C test
+
+test_polylib_special:
+	$(MAKE) test_polylib_special -C test
 
 total:
 	@echo "             /*-----------------------------------------------*"

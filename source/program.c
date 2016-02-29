@@ -59,6 +59,11 @@
 #include <osl/extensions/loop.h>
 #endif
 
+#ifdef POLYLIB_SUPPORT
+  #include <cloog/polylib/backend.h>
+  #include <cloog/polylib/special.h>
+#endif
+
 /******************************************************************************
  *                          Structure display function                        *
  ******************************************************************************/
@@ -896,6 +901,11 @@ CloogProgram *cloog_program_read(FILE *file, CloogOptions *options)
   input = cloog_input_read(file, options);
   p = cloog_program_alloc(input->context, input->ud, options);
   free(input);
+
+  #ifdef POLYLIB_SUPPORT
+    p->loop = cloog_loop_polylib_split(options->state, p->context, p->loop, 0,
+                                       options->state->backend->MAX_RAYS);
+  #endif
 
   return p;
 }
