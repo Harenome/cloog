@@ -12,7 +12,6 @@
 #include "cloog/polylib/utilities.h"
 
 #define WS 0
-#define MAX_RAYS 2048
 
 /*******************************************************************************
  * Static functions prototypes                                                 *
@@ -22,8 +21,25 @@
 static inline CloogLoop* cloog_loop_last(CloogLoop*);
 static inline CloogLoop* cloog_loop_copy_current_loop(CloogLoop*);
 
-/* Parameterized domain. */
+/* Various utilities. */
+static inline void swap_polyhedron_lists(size_t*, Polyhedron***, size_t*,
+                                         Polyhedron***);
+
+/* Utilities for cloog_polylib_split_polyhedron(). */
+static int check_domain_dependencies(const Polyhedron*, size_t, size_t);
+static inline int domain_is_splittable(const Polyhedron*, size_t, size_t,
+                                       size_t);
+static inline void free_polyhedron_array(size_t, Polyhedron*[]);
+static inline size_t count_all_polyhedra(size_t, Polyhedron*[]);
 static Polyhedron** flatten_domains(Polyhedron**, unsigned, size_t*);
+static void hunt_min_max(Polyhedron*, size_t, size_t, unsigned, Polyhedron***,
+                         size_t*);
+
+/* Utilities for hunt_min_max(). */
+static inline int iterator_is_alone(const Value*, size_t, size_t);
+static inline int has_param_or_constant(const Value*, size_t, size_t);
+
+/* Parameterized domain. */
 static Polyhedron* domain_from_constraints(size_t, Matrix*[], unsigned);
 static Matrix* matrix_add_parameters(Matrix*, size_t);
 static Polyhedron* domain_add_parameters(Polyhedron*, size_t, unsigned);
@@ -35,22 +51,25 @@ static Param_Polyhedron* compute_param_domain(Polyhedron*, Polyhedron*, size_t,
 
 /* New splits. */
 static size_t param_domain_count_domains(const Param_Domain*);
-static Polyhedron** extract_domains(const Param_Polyhedron*, size_t, unsigned);
+static void extract_domains(const Param_Polyhedron*, size_t, unsigned,
+                            Polyhedron**);
 static Polyhedron* fix_boundaries(Polyhedron*, Polyhedron*, unsigned);
 static Matrix* matrix_fix_iterators(Matrix*, size_t, size_t);
 static Polyhedron* fix_iterators_and_mix(Polyhedron*, Polyhedron*, size_t,
                                          size_t, unsigned);
-static Polyhedron** get_new_domains(Polyhedron*, const Param_Polyhedron*,
-                                    size_t, size_t, size_t, unsigned);
+static void get_new_domains(Polyhedron*, const Param_Polyhedron*, size_t,
+                            size_t, size_t, unsigned, Polyhedron**);
 
 
 /*******************************************************************************
  * cloog/polylib/special.h functions                                           *
  ******************************************************************************/
 
-CloogLoop* cloog_loop_polylib_split(CloogState* state, CloogDomain* context,
-                                    CloogLoop* loop, const size_t max_depth,
-                                    const unsigned nb_max_rays) {
+CloogLoop* cloog_loop_polylib_split(
+    CloogState* state, CloogDomain* context, CloogLoop* loop,
+    const size_t level, const size_t max_depth, const size_t nb_max_splits,
+    const size_t nb_max_constraints, const size_t nb_max_dependencies,
+    const unsigned nb_max_rays) {
    /* CloogLoop is a chained struct. Some structs will be changed, some will
     * remain intact. cloog_loop_polylib_split_current_loop() shall never modify
     * nor return any of the structs from `loop`. It must either return a copy
@@ -62,17 +81,17 @@ CloogLoop* cloog_loop_polylib_split(CloogState* state, CloogDomain* context,
     * the struct's `next` field. However, at each step, we don't know whether
     * the current struct has been split.)
     */
-
   CloogLoop* result = loop;
 
-  if (loop && loop->domain) {
-    result = cloog_loop_polylib_split_current_loop(state, context, loop,
-                                                   max_depth, nb_max_rays);
+  if (!level && loop && loop->domain) {
+    result = cloog_loop_polylib_split_current_loop(
+        state, context, loop, level, max_depth, nb_max_splits,
+        nb_max_constraints, nb_max_dependencies, nb_max_rays);
     CloogLoop* last = cloog_loop_last(result);
     for (CloogLoop* current = loop->next; current; current = current->next) {
-      last->next = cloog_loop_polylib_split_current_loop(state, context,
-                                                         current, max_depth,
-                                                         nb_max_rays);
+      last->next = cloog_loop_polylib_split_current_loop(
+          state, context, current, level, max_depth, nb_max_splits,
+          nb_max_constraints, nb_max_dependencies, nb_max_rays);
       last = cloog_loop_last(last);
     }
     cloog_loop_free(loop);
@@ -81,26 +100,25 @@ CloogLoop* cloog_loop_polylib_split(CloogState* state, CloogDomain* context,
   return result;
 }
 
-CloogLoop* cloog_loop_polylib_split_current_loop(CloogState* state,
-                                                 CloogDomain* context,
-                                                 CloogLoop* loop,
-                                                 const size_t max_depth,
-                                                 const unsigned nb_max_rays) {
+CloogLoop* cloog_loop_polylib_split_current_loop(
+    CloogState* state, CloogDomain* context, CloogLoop* loop,
+    const size_t level, const size_t max_depth, const size_t nb_max_splits,
+    const size_t nb_max_constraints, const size_t nb_max_dependencies,
+    const unsigned nb_max_rays) {
   /* The first step is to copy the input `loop` because it is important that the
    * input `loop` remains unmodified.
    * If the loop can be split, this copy will be freed and the splits will be
    * returned. Otherwise, the copy will be returned.
    */
-
   CloogLoop* result = cloog_loop_copy_current_loop(loop);
   const size_t nb_par = context->nb_par;
   Polyhedron* const context_p = cloog_domain_polyhedron(context);
   Polyhedron* const domain_p = cloog_domain_polyhedron(loop->domain);
 
   size_t nb_splits = 0;
-  Polyhedron** splits = cloog_polylib_split_polyhedron(context_p, domain_p, nb_par,
-                                               max_depth, nb_max_rays,
-                                               &nb_splits);
+  Polyhedron** splits = cloog_polylib_split_polyhedron(
+      context_p, domain_p, nb_par, level, max_depth, nb_max_splits,
+      nb_max_constraints, nb_max_dependencies, nb_max_rays, &nb_splits);
   if (splits && nb_splits) {
     CloogLoop* old = result;
     result = cloog_loop_from_polyhedron(splits[0], state, loop, nb_par);
@@ -116,14 +134,24 @@ CloogLoop* cloog_loop_polylib_split_current_loop(CloogState* state,
   return result;
 }
 
-Polyhedron** cloog_polylib_split_polyhedron(Polyhedron* const context,
-                                            Polyhedron* const domain,
-                                            const size_t nb_parameters,
-                                            const size_t max_depth,
-                                            const unsigned nb_max_rays,
-                                            size_t* const nb_new_splits) {
+void swap_polyhedron_lists(size_t* old_size, Polyhedron*** old,
+                           size_t* new_size, Polyhedron*** new) {
+  if (*new && *new_size) {
+    free_polyhedron_array(*old_size, *old);
+    *old = *new;
+    *old_size = *new_size;
+    *new = NULL;
+    *new_size = 0;
+  }
+}
+
+Polyhedron** cloog_polylib_split_polyhedron(
+    Polyhedron* const context, Polyhedron* const domain,
+    const size_t nb_parameters, const size_t level, const size_t max_depth,
+    const size_t nb_max_splits, const size_t max_constraints,
+    const size_t max_dependencies, const unsigned max_rays,
+    size_t* const result_size) {
   /* Summary:
-   * ========
    * At each level, the first step is to "flatten" the domains to prepare them
    * for compute_param_domain(). Then, each domain is split using
    * compute_param_domain() which returns a Param_Polyhedron. get_new_domains()
@@ -142,75 +170,309 @@ Polyhedron** cloog_polylib_split_polyhedron(Polyhedron* const context,
    * compute_param_domain()).
    *
    * As the final number of splits is unknown at the beginning, they are stored
-   * using two Polyhedron* arrays (the pointers 'splits' and 'new_domains') that
+   * using two Polyhedron* arrays (the pointers 'splits' and 'new_splits') that
    * are realloc'd. Domains that must be split are stored in splits. If a domain
-   * can not be split, it is moved into new_domains, otherwise it is freed and
-   * its splits are stored into new_domains. At the end of each iteration of the
-   * loop on the depth, the two arrays are swapped/freed.
+   * can not be split, it is copied into new_splits, otherwise its splits are
+   * stored into new_splits. The two arrays are swapped/freed each time the end
+   * of a given step of the algorithm is reached.
    */
-
-  const size_t nb_iterators = domain->Dimension - nb_parameters;
+  const size_t nb_iterators = domain->Dimension - (nb_parameters + level);
   const size_t max_level =
     (max_depth && max_depth < nb_iterators) ? (max_depth + 1) : nb_iterators;
 
-  /* To both store the remaining domains to process and the final results. */
+  /* To store both the remaining domains to process and the final results. */
   size_t nb_splits = 1;
   Polyhedron** splits = malloc(nb_splits * (sizeof *splits));
-  /* To temporarily store the new domains (or intact domains at a given step. */
-  size_t nb_new_domains = 0;
-  Polyhedron** new_domains = NULL;
+  /* To temporarily store the new (or intact at a given step) domains. */
+  size_t nb_new_splits = 0;
+  Polyhedron** new_splits = NULL;
+  /* Param_Polyhedron */
+  Param_Polyhedron* PA = NULL;
   /* Clean up the input, if needed. */
   splits[0] = Domain_Copy(domain);
-  splits[0] = cloog_polylib_domain_convex_attempt(splits[0], nb_max_rays);
+  splits[0] = cloog_polylib_domain_convex_attempt(splits[0], max_rays);
 
+  /* Split min/max on iterators. */
   for (size_t depth = 1; depth < max_level; ++depth) {
-    splits = flatten_domains(splits, nb_max_rays, &nb_splits);
+    /* Flattening will produce, at most, count_all_polyhedra() domains. */
+    if (count_all_polyhedra(nb_splits, splits) > nb_max_splits)
+      goto cloog_polylib_split_polyhedron_end;
+    /* Flatten and split the domains. */
+    splits = flatten_domains(splits, max_rays, &nb_splits);
     for (size_t j = 0; j < nb_splits; ++j) {
-      /* Compute the Param_Polyhedron. */
-      Param_Polyhedron* PA = compute_param_domain(context, splits[j],
-                                                  nb_iterators, depth,
-                                                  nb_max_rays);
+      if (nb_new_splits + 1 > nb_max_splits)
+        goto cloog_polylib_split_polyhedron_end;
+      PA = NULL;
+      if (domain_is_splittable(splits[j], nb_iterators, max_constraints,
+                               max_dependencies))
+        PA = compute_param_domain(context, splits[j], nb_iterators, depth,
+                                  max_rays);
+      size_t nb_temp_domains = PA ? param_domain_count_domains(PA->D) : 1;
+      if (nb_temp_domains + nb_new_splits > nb_max_splits)
+        goto cloog_polylib_split_polyhedron_end;
+      new_splits = realloc(
+          new_splits, (nb_new_splits + nb_temp_domains) * (sizeof *new_splits));
       if (PA) {
-        size_t nb_temp_domains = param_domain_count_domains(PA->D);
-        Polyhedron** temp_domains = get_new_domains(splits[j], PA,
-                                                    nb_temp_domains,
-                                                    nb_iterators, depth,
-                                                    nb_max_rays);
-        new_domains = realloc(new_domains, (nb_new_domains + nb_temp_domains) *
-                              (sizeof *new_domains));
-        for (size_t k = 0; k < nb_temp_domains; ++k)
-          new_domains[nb_new_domains + k] = temp_domains[k];
-        nb_new_domains += nb_temp_domains;
-
-        free(temp_domains);
-        Domain_Free(splits[j]);
+        get_new_domains(splits[j], PA, nb_temp_domains, nb_iterators, depth,
+                        max_rays, &new_splits[nb_new_splits]);
         Param_Polyhedron_Free(PA);
+        PA = NULL;
       } else {
-        new_domains = realloc(new_domains,
-                              (nb_new_domains + 1) * (sizeof *new_domains));
-        new_domains[nb_new_domains] = splits[j];
-        ++nb_new_domains;
+        new_splits[nb_new_splits] = Domain_Copy(splits[j]);
       }
+      nb_new_splits += nb_temp_domains;
     }
-
-    if (new_domains && nb_new_domains > 0) {
-      free(splits);
-      splits = new_domains;
-      nb_splits = nb_new_domains;
-      new_domains = NULL;
-      nb_new_domains = 0;
-    }
+    swap_polyhedron_lists(&nb_splits, &splits, &nb_new_splits, &new_splits);
   }
 
-  *nb_new_splits = nb_splits;
-  return splits;
+  /* Split min/max on parameters. */
+  splits = flatten_domains(splits, max_rays, &nb_splits);
+  for (size_t i = 0; i < nb_splits; ++i) {
+    hunt_min_max(splits[i], nb_iterators, nb_parameters, max_rays, &new_splits,
+                 &nb_new_splits);
+    if ((nb_splits - i + nb_new_splits) > nb_max_splits)
+      goto cloog_polylib_split_polyhedron_end;
+  }
+  swap_polyhedron_lists(&nb_splits, &splits, &nb_new_splits, &new_splits);
+
+  cloog_polylib_split_polyhedron_end:
+    if (PA)
+      Param_Polyhedron_Free(PA);
+    if (new_splits && nb_new_splits)
+      free_polyhedron_array(nb_new_splits, new_splits);
+
+    *result_size = nb_splits;
+    return splits;
 }
 
 /*******************************************************************************
  * Static functions definitions                                                *
  ******************************************************************************/
 
-/* Utilities for CloogLoop. */
+/**
+ * \brief Ensure iterators do not depend on too many other iterators.
+ *
+ * \param[in] p                   Input domain.
+ * \param[in] nb_iterators        Total number of iterators.
+ * \param[in] nb_max_dependencies Maximum dependency level.
+ *
+ * \return The result of the test.
+ * \retval 0 if at least one iterator depends on \a nb_max_dependencies
+ *           (or more) iterators.
+ * \retval 1 if the iterators of the domain do not depend on too many iterators.
+ */
+int check_domain_dependencies(const Polyhedron* p, size_t nb_iterators,
+                              size_t nb_max_dependencies) {
+  int result = 1;
+  for (size_t row = 0; result && row < p->NbConstraints; ++row) {
+    Value* constraint = p->Constraint[row];
+    /* Find the most inner iterator. */
+    size_t inner = nb_iterators;
+    for ( ; !value_notzero_p(constraint[inner]) && inner >= 1; --inner)
+      ;
+    /* Count the dependencies. */
+    size_t count = 0;
+    for (size_t column = 1; result && column < inner; ++column)
+      if (value_notzero_p(constraint[column])) {
+        ++count;
+        if (count >= nb_max_dependencies)
+          result = 0;
+      }
+  }
+
+  return result;
+}
+
+/**
+ * \brief Decide a domain's splittableness according to various characteristics.
+ *
+ * \param[in] domain             The split candidate.
+ * \param[in] nb_iterators       Total number of iterators.
+ * \param[in] nb_max_constraints Maximum number of constraints.
+ * \param[in] nb_max_deps        Maximum dependency level.
+ *
+ * \return The splittableness of the domain.
+ * \retval 0 if it is a bad idea to attempt to split the domain.
+ * \retval 1 if the domain *seems* to be a good split candidate.
+ */
+int domain_is_splittable(const Polyhedron* domain, size_t nb_iterators,
+                         size_t nb_max_constraints, size_t nb_max_deps) {
+  int is_ok = domain->NbConstraints < nb_max_constraints &&
+              check_domain_dependencies(domain, nb_iterators, nb_max_deps);
+  return is_ok;
+}
+
+/**
+ * \brief Free an array of polyhedra.
+ *
+ * \param[in] nb_domains Number of domains.
+ * \param[in] domains    Domains.
+ */
+void free_polyhedron_array(size_t nb_domains, Polyhedron* domains[nb_domains]) {
+  for (size_t i = 0; i < nb_domains; ++i)
+    Domain_Free(domains[i]);
+  free(domains);
+}
+
+/**
+ * \brief Count all polyhedra in an array of domains.
+ *
+ * \param[in] nb_domains Number of domains.
+ * \param[in] domains    Domains.
+ *
+ * \return Total number of polyhedra.
+ *
+ * \details This function counts the number of polyhedra within an array of
+ *          domains, i.e. it returns the sum of the polyhedra counts of each
+ *          domain (which can be unions of polyhedra) in the array.
+ */
+size_t count_all_polyhedra(size_t nb_domains, Polyhedron* domains[nb_domains]) {
+  size_t count = 0;
+  for (size_t i = 0; i < nb_domains; ++i)
+    for (const Polyhedron* p = domains[i]; p; p = p->next)
+      ++count;
+  return count;
+}
+
+/**
+ * \brief Determine whether an iterator is the sole iterator in a constraint.
+ *
+ * \param[in] constraint   Input constraint.
+ * \param[in] it           Iterator index.
+ * \param[in] nb_iterators Total number of iterators.
+ *
+ * \return The result of the test.
+ * \retval 0 if more than one iterator is used in the constraint.
+ * \retval 1 if the iterator is the only one used in the constraint.
+ */
+int iterator_is_alone(const Value* constraint, const size_t it,
+                      const size_t nb_iterators) {
+  int is_alone = 1;
+  for (size_t column = 1; is_alone && column < it; ++column)
+    if (value_notzero_p(constraint[column]))
+      is_alone = 0;
+  for (size_t column = it + 1; is_alone && column <= nb_iterators; ++column)
+    if (value_notzero_p(constraint[column]))
+      is_alone = 0;
+  return is_alone;
+}
+
+/**
+ * \brief Determine whether at least a parameter or a constant is used.
+ *
+ * \param[in] constraint    Input constraint.
+ * \param[in] nb_iterators  Total number of iterators.
+ * \param[in] nb_parameters Total number of parameters.
+ *
+ * \return The result of the test.
+ * \retval 0 if no parameter or constant is used.
+ * \retval 1 if at least one parameter or a constant is used in the constraint.
+ */
+int has_param_or_constant(const Value* constraint, const size_t nb_iterators,
+                          const size_t nb_parameters) {
+  int has_one = 0;
+  const size_t start = nb_iterators + 1;
+  const size_t end = nb_iterators + nb_parameters + 1;
+  for (size_t column = start; !has_one && column <= end; ++column)
+    if (value_notzero_p(constraint[column]))
+      has_one = 1;
+  return has_one;
+}
+
+/**
+ * \brief Hunt down min/max on parameters.
+ *
+ * \param[in]     domain        Input domain.
+ * \param[in]     nb_iterators  Total number of iterators.
+ * \param[in]     nb_parameters Total number of parameters.
+ * \param[in]     max_rays      Maximum number of rays.
+ * \param[in,out] result        Array of the resulting splits.
+ * \param[in,out] result_size   Size of the resulting array.
+ */
+void hunt_min_max(Polyhedron* domain, const size_t nb_iterators,
+                  const size_t nb_parameters, const unsigned max_rays,
+                  Polyhedron*** result, size_t* result_size) {
+  const size_t dimension = domain->Dimension + 2;
+  Value new_constraint[dimension];
+  for (size_t i = 0; i < dimension; ++i)
+    value_init(new_constraint[i]);
+
+  size_t nb_splits = 1;
+  Polyhedron** splits = malloc(nb_splits * (sizeof *splits));
+  splits[0] = Domain_Copy(domain);
+  size_t nb_new_splits = 0;
+  Polyhedron** new_splits = NULL;
+
+  for (size_t it = 1; it <= nb_iterators; ++it) {
+    int splitted = 1;
+    while (splitted) {
+      splitted = 0;
+      for (size_t i = 0; i < nb_splits; ++i) {
+        Polyhedron* const p = splits[i];
+        const size_t nb_rows = p->NbConstraints;
+        /* Find the min/max constraints. */
+        size_t nb_min = 0, nb_max = 0;
+        Value* minimums[2], * maximums[2];
+        for (size_t row = 0; nb_min < 2 && nb_max < 2 && row < nb_rows; ++row) {
+          Value* constraint = p->Constraint[row];
+          if (!value_zero_p(constraint[0]) &&
+              value_notzero_p(constraint[it]) &&
+              iterator_is_alone(constraint, it, nb_iterators) &&
+              has_param_or_constant(constraint, nb_iterators, nb_parameters)) {
+            if (value_pos_p(constraint[it]))
+              maximums[nb_max++] = constraint;
+            else
+              minimums[nb_min++] = constraint;
+          }
+        }
+        /* Split, if possible. */
+        if (nb_min >= 2 || nb_max >= 2) {
+          splitted = 1;
+          /* Enlarge the domain list. */
+          nb_new_splits += 2;
+          new_splits = realloc(new_splits,
+                               nb_new_splits * (sizeof *new_splits));
+          /* Prepare the first new constraint. */
+          Value** involved = nb_max >= 2 ? maximums : minimums;
+          Vector_Copy(involved[0], new_constraint, dimension);
+          for (size_t col = 1; col < dimension; ++col)
+            value_subtract(new_constraint[col], new_constraint[col],
+                           involved[1][col]);
+          /* Use the first constraint for the first split. */
+          new_splits[nb_new_splits - 2] = AddConstraints(new_constraint, 1, p,
+                                            max_rays);
+          /* Prepare the second new constraint. */
+          for (size_t col = 1; col < dimension; ++col)
+            value_oppose(new_constraint[col], new_constraint[col]);
+          value_sub_int(new_constraint[dimension - 1],
+                        new_constraint[dimension - 1], 1);
+          /* Use the second constraint for the second split. */
+          new_splits[nb_new_splits - 1] = AddConstraints(new_constraint, 1, p,
+                                                         max_rays);
+        } else {
+          ++nb_new_splits;
+          new_splits = realloc(new_splits,
+                               nb_new_splits * (sizeof *new_splits));
+          new_splits[nb_new_splits - 1] = Domain_Copy(p);
+        }
+      }
+      swap_polyhedron_lists(&nb_splits, &splits, &nb_new_splits, &new_splits);
+    }
+  }
+
+  /* Copy the new splits. */
+  Polyhedron** local = *result;
+  local = realloc(local, (*result_size + nb_splits) * (sizeof *local));
+  for (size_t j = 0; j < nb_splits; ++j)
+    local[*result_size + j] = splits[j];
+  *result = local;
+  *result_size += nb_splits;
+
+  if (splits)
+    free(splits);
+  for (size_t i = 0; i < dimension; ++i)
+    value_clear(new_constraint[i]);
+}
 
 /**
  * \brief Get the last CloogLoop.
@@ -244,8 +506,6 @@ CloogLoop* cloog_loop_copy_current_loop(CloogLoop* loop) {
 
   return result;
 }
-
-/* Parameterized domain. */
 
 /**
  * \brief Break unions of polyhedra into an array of single polyhedra.
@@ -410,10 +670,9 @@ Matrix* matrix_move_iterators_last(Matrix* const m, const size_t nb_iterators,
  *
  * \warning Do not use this function if \a domain is an union of polyhedra.
  */
-Polyhedron* domain_move_iterators_last(Polyhedron* const domain,
-                                       const size_t nb_iterators,
-                                       const size_t n,
-                                       unsigned nb_max_rays) {
+Polyhedron* domain_move_iterators_last(
+    Polyhedron* const domain, const size_t nb_iterators, const size_t n,
+    unsigned nb_max_rays) {
   Polyhedron* temp = Domain_Copy(domain);
   Matrix* constraints = matrix_move_iterators_last(Polyhedron2Constraints(temp),
                                                    nb_iterators, n);
@@ -436,11 +695,9 @@ Polyhedron* domain_move_iterators_last(Polyhedron* const domain,
  *
  * \note This function does not modify its input.
  */
-Param_Polyhedron* compute_param_domain(Polyhedron* const original_context,
-                                       Polyhedron* const original_domain,
-                                       const size_t nb_iterators,
-                                       const size_t depth,
-                                       const unsigned nb_max_rays) {
+Param_Polyhedron* compute_param_domain(
+    Polyhedron* const original_context, Polyhedron* const original_domain,
+    const size_t nb_iterators, const size_t depth, const unsigned nb_max_rays) {
   /* This step temporarily "transforms" iterators into parameters:
    * - move their columns after the remaining iterators in the domain.
    * - add empty columns to the context.
@@ -456,8 +713,6 @@ Param_Polyhedron* compute_param_domain(Polyhedron* const original_context,
 
   return PA;
 }
-
-/* New splits. */
 
 /**
  * \brief Count the domains of a Param_Domain.
@@ -480,14 +735,14 @@ size_t param_domain_count_domains(const Param_Domain* domain) {
  * \param[in] PA          The input Param_Polyhedron.
  * \param[in] nb_domains  The number of domains to extract.
  * \param[in] nb_max_rays Maximum number of rays
+ * \param[in,out]
  *
  * \return The domains.
  */
-Polyhedron** extract_domains(const Param_Polyhedron* PA,
-                             const size_t nb_domains,
-                             const unsigned nb_max_rays) {
+void extract_domains(const Param_Polyhedron* PA, const size_t nb_domains,
+                     const unsigned nb_max_rays, Polyhedron** const domains) {
   size_t count = 0;
-  Polyhedron** const domains = malloc(nb_domains * (sizeof *domains));
+  /* Polyhedron** const domains = malloc(nb_domains * (sizeof *domains)); */
   for (const Param_Domain* P = PA->D; P; P = P->next) {
     domains[count] = cloog_polylib_domain_soft_disjoint_const(P->Domain,
                                                               nb_max_rays);
@@ -498,8 +753,6 @@ Polyhedron** extract_domains(const Param_Polyhedron* PA,
     }
     ++count;
   }
-
-  return domains;
 }
 
 /**
@@ -618,25 +871,23 @@ Polyhedron* fix_iterators_and_mix(Polyhedron* original, Polyhedron* domain,
  * \param[in] nb_iterators The number of iterators
  * \param[in] depth        The current depth.
  * \param[in] nb_max_rays  The maximum number of rays.
- *-
- * \return The new domains.
+ * \param[in,out] domains  The new domains.
  *
  * \note The input parameter \a original is not modified.
+ * \warning \a domains must have been allocated prior the call to this funcion.
  */
-Polyhedron** get_new_domains (Polyhedron* original, const Param_Polyhedron* PA,
-                              const size_t nb_domains,
-                              const size_t nb_iterators, const size_t depth,
-                              const unsigned nb_max_rays) {
+void get_new_domains (
+    Polyhedron* original, const Param_Polyhedron* PA, const size_t nb_domains,
+    const size_t nb_iterators, const size_t depth, const unsigned nb_max_rays,
+    Polyhedron** const domains) {
   /* The domains we get via Polyhedron2Param_Domain() may have overlapping
    * boundaries which must be fixed. Then, the iterators must be rearranged
    * (because their order had been modified in order to use
    * Polyhedron2Param_Domain()). Finally, each new domain's constraints are
    * added to the original domain.
    */
-  Polyhedron** domains = extract_domains(PA, nb_domains, nb_max_rays);
+  extract_domains(PA, nb_domains, nb_max_rays, domains);
   for (size_t i = 0; i < nb_domains; ++i)
     domains[i] = fix_iterators_and_mix(original, domains[i], nb_iterators,
                                        depth, nb_max_rays);
-
-  return domains;
 }

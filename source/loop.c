@@ -41,6 +41,11 @@
 # include <stdio.h>
 # include "../include/cloog/cloog.h"
 
+#ifdef POLYLIB_SUPPORT
+  #include <cloog/polylib/backend.h>
+  #include <cloog/polylib/special.h>
+#endif
+
 #define ALLOC(type) (type*)malloc(sizeof(type))
 
 
@@ -1840,6 +1845,26 @@ void cloog_loop_get_fl(CloogLoop *loop, int *f, int *l,
     cloog_loop_get_fl(loop->inner, f, l, options);
     cloog_loop_get_fl(loop->next, f, l, options);
 }
+static inline CloogLoop* cloog_loop_last(CloogLoop* loop) {
+  CloogLoop* last = loop;
+  while (last->next)
+    last = last->next;
+
+  return last;
+}
+
+static inline CloogLoop* cloog_loop_copy_current_loop(CloogLoop* loop) {
+  /* At this step, most fields are NULL. */
+  CloogLoop* result = cloog_loop_malloc(loop->state);
+  result->domain = cloog_domain_copy(loop->domain);
+  result->otl = loop->otl;
+  result->stride = cloog_stride_copy(loop->stride);
+  result->block = cloog_block_copy(loop->block);
+
+  return result;
+}
+
+
 
 /**
  * cloog_loop_generate_general function:
@@ -1900,6 +1925,32 @@ CloogLoop *cloog_loop_generate_general(CloogLoop *loop,
     res = cloog_loop_separate(loop);
     separate = 1;
   }
+
+  #ifdef POLYLIB_SUPPORT
+    CloogLoop* old_res = res;
+    CloogLoop* next_current;
+    res = NULL;
+    for (CloogLoop* current = old_res; current; current = next_current) {
+        next_current = current->next;
+        unsigned MAX_RAYS = current->state->backend->MAX_RAYS;
+        CloogLoop* new_res = cloog_loop_polylib_split(current->state,
+                                                      current->domain,
+                                                      current->inner, level, 0,
+                                                      256, 48, 3,
+                                                      MAX_RAYS);
+      CloogLoop* replacement = cloog_loop_copy_current_loop(current);
+      replacement->inner = new_res;
+      replacement->next = NULL;
+      if (res) {
+          CloogLoop* last = cloog_loop_last(res);
+          last->next = replacement;
+      } else {
+          res = replacement;
+      }
+      current->inner = NULL;
+    }
+    cloog_loop_free(old_res);
+  #endif
     
   /* 3b. -correction- sort the loops to determine their textual order. */
   res = cloog_loop_sort(res, level);
