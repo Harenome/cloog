@@ -123,6 +123,14 @@ struct cloogoptions
   int noblocks ;  /* 1 if I don't want to make statement blocks, 0 otherwise. */
   int noscalars ; /* 1 if I don't want to use scalar dimensions, 0 otherwise. */
   int nosimplify; /* 1 if I don't want to simplify polyhedra, 0 otherwise. */
+
+  #ifdef POLYLIB_SUPPORT
+    int split;
+    int split_max;
+    int split_depth;
+    int split_constraints;
+    int split_dependencies;
+  #endif
 } ;
 
 

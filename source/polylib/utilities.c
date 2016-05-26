@@ -172,6 +172,7 @@ CloogLoop* cloog_loop_from_polyhedron(Polyhedron* domain, CloogState* state,
   result->otl = source->otl;
   result->stride = cloog_stride_copy(source->stride);
   result->block = cloog_block_copy(source->block);
+  result->inner = cloog_loop_copy(source->inner);
 
   return result;
 }

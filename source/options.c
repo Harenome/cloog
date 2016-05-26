@@ -364,6 +364,14 @@ CloogOptions *cloog_options_malloc(CloogState *state)
   options->noscalars   =  0 ;  /* I do want to use scalar dimensions.*/
   options->nosimplify  =  0 ;  /* I do want to simplify polyhedra.*/
   
+  #ifdef POLYLIB_SUPPORT
+    options->split              = 0;
+    options->split_max          = 256;
+    options->split_depth        = 0;
+    options->split_constraints  = 48;
+    options->split_dependencies = 3;
+  #endif
+
   return options ;
 }
 
@@ -389,7 +397,21 @@ void cloog_options_read(CloogState *state, int argc, char **argv,
 
   for (i=1;i<argc;i++)
   if (argv[i][0] == '-')
-  { if (strcmp(argv[i],"-l")   == 0)
+  {
+    #ifdef POLYLIB_SUPPORT
+      if (!strcmp(argv[i], "-split"))
+        (*options)->split = 1;
+      else if (!strcmp(argv[i], "-split-max"))
+        cloog_options_set(&(*options)->split_max, argc, argv, &i);
+      else if (!strcmp(argv[i], "-split-depth"))
+        cloog_options_set(&(*options)->split_depth, argc, argv, &i);
+      else if (!strcmp(argv[i], "-split-constraints"))
+        cloog_options_set(&(*options)->split_constraints, argc, argv, &i);
+      else if (!strcmp(argv[i], "-split-dependencies"))
+        cloog_options_set(&(*options)->split_dependencies, argc, argv, &i);
+      else
+    #endif
+    if (strcmp(argv[i],"-l")   == 0)
     cloog_options_set(&(*options)->l,argc,argv,&i) ;
     else
     if (strcmp(argv[i],"-f")   == 0)

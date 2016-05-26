@@ -21,6 +21,7 @@ extern "C"
  * \defgroup cloog_polylib_special CLooG-PolyLib special features
  */
 
+
 /**
  * \brief Split loops.
  *
@@ -60,69 +61,11 @@ extern "C"
  *
  * \ingroup cloog_polylib_special
 */
-CloogLoop* cloog_loop_polylib_split(
-    CloogState* state, CloogDomain* context, CloogLoop* loop, size_t level,
-    size_t max_depth, size_t nb_max_splits, size_t nb_max_constraints,
-    size_t nb_max_dependencies, unsigned nb_max_rays);
+CloogLoop* cloog_loop_generate_split(
+    CloogOptions* options, size_t level, CloogLoop* loop);
 
-/**
- * \brief If possible, split the current loop.
- *
- * \param[in] state     CLooG state.
- * \param[in] context   Input context.
- * \param[in] loop      Input loops.
- * \param[in] max_depth Maximum depth of the split algorithm.
- * \param[in] nb_max_splits       Maximum number of splits.
- * \param[in] nb_max_constraints  Maximum constraint number in split candidates.
- * \param[in] nb_max_dependencies Maximum dependency level in split candidates.
- * \param[in] nb_max_rays         Maximum number of rays.
- *
- * \return The unmodified loop or the splits, if any.
- *
- * \note The input loop is not modified.
- * \details This function attempts to split the current CloogLoop (i.e. only the
- *          struct directly pointed by \a loop, not all loops on the same level
- *          pointed by \a loop->next). See cloog_loop_polylib_split() for an
- *          explanation on \a max_depth, \a nb_max_splits,
- *          \a nb_max_constraints, \a nb_max_dependencies and \a nb_max_rays.
- * \see cloog_loop_polylib_split
- *
- *
- * \ingroup cloog_polylib_special
- */
-CloogLoop* cloog_loop_polylib_split_current_loop(
-    CloogState* state, CloogDomain* context, CloogLoop* loop, size_t level,
-    size_t max_depth, size_t nb_max_splits, size_t nb_max_constraints,
-    size_t nb_max_dependencies, unsigned nb_max_rays);
-
-/**
- * \brief Split a PolyLib domain.
- *
- * \param[in]  context             Input context.
- * \param[in]  domain              Input domain.
- * \param[in]  nb_parameters       The number of parameters.
- * \param[in]  max_depth           Max depth of the split algorithm.
- * \param[in]  nb_max_splits       Max number of splits.
- * \param[in]  nb_max_constraints  Max constraint number in split candidates.
- * \param[in]  nb_max_dependencies Max dependency level in split candidates.
- * \param[in]  nb_max_rays         Max number of rays.
- * \param[out] nb_splits           The number of splits.
- *
- * \return Splits of the input domain.
- *
- * \note The input parameters \a context and \a domain are not modified.
- * \details If \a max_depth = 0, then the depth is infinite. See
- *          cloog_loop_polylib_split() for an explanation on \a max_depth,
- *          \a nb_max_splits, \a nb_max_constraints, \a nb_max_dependencies and
- *          \a nb_max_rays.
- * \see cloog_loop_polylib_split_current_loop
- *
- * \ingroup cloog_polylib_special
- */
-Polyhedron** cloog_polylib_split_polyhedron(
-    Polyhedron* context, Polyhedron* domain, size_t nb_parameters, size_t level,
-    size_t max_depth, size_t nb_max_split, size_t nb_max_constraints,
-    size_t nb_max_dependencies, unsigned nb_max_rays, size_t* nb_splits);
+extern CloogLoop * cloog_loop_copy(CloogLoop * source);
+extern CloogLoop* cloog_loop_last(CloogLoop* loop);
 
 #if defined(__cplusplus)
 }
